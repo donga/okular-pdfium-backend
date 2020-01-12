@@ -120,9 +120,8 @@ public:
                 image.fill(0xFFFFFFFF);
                 FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, image.width(), image.height(), 0, FPDF_ANNOT);//FPDF_ANNOT | FPDF_PRINTING | FPDF_LCD_TEXT);
                 FPDFBitmap_Destroy(bitmap);
-                return image.rgbSwapped();
             }
-            cachedImage = image;
+            cachedImage = image.rgbSwapped();
         }
         return cachedImage;
     }
