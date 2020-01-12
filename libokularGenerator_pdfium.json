@@ -1,0 +1,31 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "donga.nb@gmail.com",
+                "Name": "Thanomsub Noppaburana",
+                "Name[x-test]": "xxThanomsub Noppaburanaxx"
+            }
+        ],
+        "Copyright": "© 2019-2020 Thanomsub Noppaburana",
+        "Copyright[x-test]": "xx© 2019-2020 Thanomsub Noppaburanaxx",
+        "Description": "PDF file renderer using PDFium",
+        "Description[x-test]": "xxPDF file renderer using PDFIUMdxx",
+        "Id": "okular_pdfium",
+        "License": "GPL",
+        "MimeTypes": [
+            "application/x-pdf",
+            "application/pdf",
+            "application/x-wwf"
+        ], 
+        "Name": "PDF Renderer using PDFium",
+        "Name[x-test]": "xxPDF Renderer using PDFiumxx",
+        "ServiceTypes": [
+            "okular/Generator"
+        ],
+        "Version": "0.0.1"
+    },
+    "X-KDE-Priority": 1,
+    "X-KDE-okularAPIVersion": 1,
+    "X-KDE-okularHasInternalSettings": true
+}
