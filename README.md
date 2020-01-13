@@ -18,3 +18,9 @@ $ cmake ..
 $ make
 $ sudo make install
 ```
+
+Bugs
+----
+- Text Selection still buggy
+- Wrong Page zoom scale
+- Let me know
