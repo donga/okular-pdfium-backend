@@ -16,6 +16,8 @@
 #include <pdfium/fpdf_sysfontinfo.h>
 
 #include <QImage>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include <okular/core/action.h>
 #include <okular/core/document.h>
@@ -29,11 +31,11 @@ namespace QPdfium {
 class PagePrivate
 {
 public:
-    PagePrivate(FPDF_DOCUMENT pdfdoc, int pageNumber)
+    PagePrivate(FPDF_DOCUMENT pdfdoc, int pageNumber, const QSizeF &dpi)
     {
         this->pdfdoc = pdfdoc;
         this->pageNumber = pageNumber;
-        getPage();
+        this->dpi = dpi;
     }
 
     ~PagePrivate()
@@ -76,7 +78,7 @@ public:
 
     FPDF_TEXTPAGE getTextPage()
     {
-        if (getPage() && !textPage) {
+        if (!textPage && getPage()) {
             textPage = FPDFText_LoadPage(getPage());
             numChars = FPDFText_CountChars(textPage);
             numRects = FPDFText_CountRects(textPage, 0, numChars);
@@ -88,40 +90,36 @@ public:
     {
         if (textPage) {
             FPDFText_ClosePage(textPage);
+            textPage = nullptr;
         }
-        textPage = nullptr;
     }
 
     QString getPageLabel()
     {
         if (pdfdoc && pageLabel.isNull()) {
-            const unsigned long labelLength = FPDF_GetPageLabel(pdfdoc, pageNumber, nullptr, 0);
-            QVector<ushort> buffer(labelLength);
-            FPDF_GetPageLabel(pdfdoc, pageNumber, buffer.data(), buffer.length());
-            pageLabel = QString::fromUtf16(buffer.data());
+            pageLabel = QPdfium::GetPageLabel(pdfdoc, pageNumber);
         }
         return pageLabel;
     }
 
     QSizeF getPageSize()
     {
-        if (getPage() && pageSize.isEmpty()) {
-            pageSize.setWidth(FPDF_GetPageWidth(fzPage));
-            pageSize.setHeight(FPDF_GetPageHeight(fzPage));
+        if (pageSize.isEmpty() && pdfdoc) {
+            pageSize = QPdfium::GetPageSizeF(pdfdoc, pageNumber);
         }
         return pageSize;
     }
 
     QImage image(const int &width, const int &height)
     {
-        if (cachedImage.isNull()) {
-            QImage image(width, height, QImage::Format_RGBA8888);
+        if ((cachedImage.isNull() && getPage()) || (cachedImage.size() != QSize(width, height))) {
+            QImage image(width, height, QImage::Format_ARGB32);
             if (FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(image.width(), image.height(), FPDFBitmap_BGRA, image.bits(), image.bytesPerLine())) {
                 image.fill(0xFFFFFFFF);
                 FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, image.width(), image.height(), 0, FPDF_ANNOT);//FPDF_ANNOT | FPDF_PRINTING | FPDF_LCD_TEXT);
                 FPDFBitmap_Destroy(bitmap);
             }
-            cachedImage = image.rgbSwapped();
+            cachedImage = image;
         }
         return cachedImage;
     }
@@ -187,13 +185,23 @@ public:
 
         return charEntityList;
     }
+    
+    bool hasLinks()
+    {
+        if (getPage() && !isHasLinks) {
+            int linkPos = 0;
+            FPDF_LINK linkAnnot;
+            isHasLinks = FPDFLink_Enumerate(fzPage, &linkPos, &linkAnnot);
+        }
+        return isHasLinks;
+    }
 
     QLinkedList<Okular::ObjectRect*> getLinks()
     {
         if (!getPage())
             return links;
 
-        if (!links.isEmpty())
+        if (isLinksGenerated)
             return links;
 
         const qreal width   = pageSize.width();
@@ -223,8 +231,8 @@ public:
 
             if (hasRect && (targetPage != -1 || !uriStr.isNull())) {
                 int devX, devY;
-                qreal nWidth  = (rect.right-rect.left);
-                qreal nHeight = (rect.bottom-rect.top);
+                qreal nWidth  = (rect.right - rect.left);
+                qreal nHeight = (rect.bottom - rect.top);
                 FPDF_PageToDevice(fzPage, 0, 0, width, height, 0, rect.left, rect.top, &devX, &devY);
                 QRectF boundary = QRectF(devX/width, (devY - nHeight)/height, nWidth/width, nHeight/height);
 
@@ -239,7 +247,7 @@ public:
                         viewport.rePos.normalizedY = (targetSizeF.height() - targetPointF.y()) / targetSizeF.height();
                         viewport.rePos.enabled = true;
                     }
-                    okularAction = new Okular::GotoAction(QString(), viewport);
+                    okularAction = new Okular::GotoAction(uriStr, viewport);
                 }
                 else if (!uriStr.isNull()) { // external link
                     okularAction = new Okular::BrowseAction(QUrl(uriStr));
@@ -256,6 +264,9 @@ public:
             }
 
         }
+        
+        isLinksGenerated = true;
+        
         return links;
     }
 
@@ -263,6 +274,7 @@ public:
     FPDF_DOCUMENT pdfdoc {nullptr};
     FPDF_PAGE fzPage {nullptr};
     FPDF_TEXTPAGE textPage {nullptr};
+    QSizeF dpi {0.0, 0.0};
     QSizeF pageSize {0.0, 0.0};
     int pageNumber {-1};
     QString pageLabel;
@@ -272,10 +284,13 @@ public:
     QImage cachedImage;
     QList<CharEntity*> charEntityList;
     QLinkedList<Okular::ObjectRect*> links;
+    bool isHasLinks {false};
+    bool isLinksGenerated {false};
+    QMutex mutex;
 };
 
-Page::Page(FPDF_DOCUMENT pdfdoc, int pageNumber)
-  : d(new PagePrivate(pdfdoc, pageNumber))
+Page::Page(FPDF_DOCUMENT pdfdoc, int pageNumber, const QSizeF &dpi)
+  : d(new PagePrivate(pdfdoc, pageNumber, dpi))
 {
 }
 
@@ -337,16 +352,24 @@ int Page::numRects() const
 
 QImage Page::image(const int &width, const int &height)
 {
+    QMutexLocker locker(&d->mutex);
     return d->image(width, height);
 }
 
 QList<CharEntity*> Page::charEntityList() const
 {
+    QMutexLocker locker(&d->mutex);
     return d->getCharEntityList();
+}
+
+bool Page::hasLinks()
+{
+    return d->hasLinks();
 }
 
 QLinkedList<Okular::ObjectRect*> Page::links() const
 {
+    QMutexLocker locker(&d->mutex);
     return d->getLinks();
 }
 

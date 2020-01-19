@@ -29,10 +29,10 @@ public:
     Okular::DocumentInfo generateDocumentInfo(const QSet<Okular::DocumentInfo::Key> &keys) const override;
     const Okular::DocumentSynopsis *generateDocumentSynopsis() override;
     QVariant metaData(const QString &key, const QVariant &option) const override;
+    QImage image(Okular::PixmapRequest *page) override;
     
 protected:
     bool doCloseDocument() override;
-    QImage image(Okular::PixmapRequest *page) override;
     Okular::TextPage *textPage(Okular::TextRequest *request) override;
 
 private:

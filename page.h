@@ -36,7 +36,7 @@ class PagePrivate;
 class Page
 {
 public:
-    Page(FPDF_DOCUMENT pdfdoc, int pageNumber);
+    Page(FPDF_DOCUMENT pdfdoc, int pageNumber, const QSizeF &dpi);
     ~Page();
 
     FPDF_PAGE getPdfPage();
@@ -51,6 +51,7 @@ public:
     int numChars() const;
     int numRects() const;
     QList<CharEntity*> charEntityList() const;
+    bool hasLinks();
     QLinkedList<Okular::ObjectRect*> links() const;
     QImage image(const int &width, const int &height);
 

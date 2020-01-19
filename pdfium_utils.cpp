@@ -34,6 +34,14 @@ QDateTime pdfiumDateToQDateTime(const QString &textDate)
     return QDateTime::fromString(text, Qt::ISODate);
 }
 
+QString GetPageLabel(FPDF_DOCUMENT pdfdoc, int pageNumber)
+{
+    const unsigned long labelLength = FPDF_GetPageLabel(pdfdoc, pageNumber, nullptr, 0);
+    QVector<ushort> buffer(labelLength);
+    FPDF_GetPageLabel(pdfdoc, pageNumber, buffer.data(), buffer.length());
+    return QString::fromUtf16(buffer.data());
+}
+
 QSizeF GetPageSizeF(FPDF_DOCUMENT pdfdoc, int pageNumber)
 {
     double width, height;

@@ -42,6 +42,7 @@ namespace QPdfium {
 
     QDateTime pdfiumDateToQDateTime(const QString &textDate);
     bool isWhiteSpace(const QString &str);
+    QString GetPageLabel(FPDF_DOCUMENT pdfdoc, int pageNumber);
     QSizeF GetPageSizeF(FPDF_DOCUMENT pdfdoc, int pageNumber);
     QPointF GetLocationInPage(FPDF_DEST destination);
     QRectF FloatPageRectToPixelRect(FPDF_PAGE page, const QRectF &input);

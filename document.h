@@ -35,10 +35,10 @@ public:
     PageMode pageMode() const;
     PagePtr page(int pageNumber) const;
     QString metaText(const QByteArray &key) const;
-    static Document *load(const QString &filePath, const QString &password = QString());
+    static Document *load(const QString &filePath, const QString &password = QString(), const QSizeF &dpi = {0.0, 0.0});
 
 private:
-    Document(const QString &filePath, const QString &password = QString());
+    Document(const QString &filePath, const QString &password = QString(), const QSizeF &dpi = {0.0, 0.0});
 
 private:
     QScopedPointer<DocumentPrivate> d;

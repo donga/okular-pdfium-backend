@@ -29,8 +29,9 @@ namespace QPdfium {
 class DocumentPrivate
 {
 public:
-    bool loadDocument(const QString &filePath, const QByteArray &password)
+    bool loadDocument(const QString &filePath, const QByteArray &password, const QSizeF &dpi)
     {
+        this->dpi = dpi;
         this->filePath = filePath;
         if (!pdfdoc && (pdfdoc = FPDF_LoadDocument(QFile::encodeName(filePath).constData(), password.constData()))) {
             unsigned long err = FPDF_GetLastError();
@@ -66,12 +67,13 @@ public:
     Okular::DocumentSynopsis *synopsis {nullptr};
     bool locked {false};
     PageMode pageMode {PageMode_Unknown};
+    QSizeF dpi {0.0, 0.0};
 };
 
-Document::Document(const QString &filePath, const QString &password)
+Document::Document(const QString &filePath, const QString &password, const QSizeF &dpi)
   : d(new DocumentPrivate())
 {
-    d->loadDocument(filePath, password.toLatin1());
+    d->loadDocument(filePath, password.toLatin1(), dpi);
 }
 
 Document::~Document()
@@ -83,9 +85,9 @@ FPDF_DOCUMENT Document::pdfdoc() const
     return d->pdfdoc;
 }
 
-Document *Document::load(const QString &filePath, const QString &password)
+Document *Document::load(const QString &filePath, const QString &password, const QSizeF &dpi)
 {
-    return new Document(filePath, password);
+    return new Document(filePath, password, dpi);
 }
 
 bool Document::isLocked() const
@@ -95,12 +97,12 @@ bool Document::isLocked() const
 
 bool Document::unlock(const QByteArray &password)
 {
-    return d->loadDocument(d->filePath, password);
+    return d->loadDocument(d->filePath, password, d->dpi);
 }
 
 PagePtr Document::page(int pageNumber) const
 {
-    return PagePtr(new Page(d->pdfdoc, pageNumber));
+    return PagePtr(new Page(d->pdfdoc, pageNumber, d->dpi));
 }
 
 int Document::pagesCount() const
