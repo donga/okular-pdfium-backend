@@ -46,6 +46,7 @@ public:
     PDFiumGeneratorPrivate(const PDFiumGeneratorPrivate &other);
     ~PDFiumGeneratorPrivate();
 
+    Okular::Page* *pagesVector {nullptr};
     QPdfium::Document *doc {nullptr};
     FPDF_DOCUMENT pdfDoc {nullptr};
     int pagesCount {-1};
@@ -95,6 +96,9 @@ PDFiumGeneratorPrivate::PDFiumGeneratorPrivate(const PDFiumGeneratorPrivate &oth
 PDFiumGeneratorPrivate::~PDFiumGeneratorPrivate()
 {
     QMutexLocker lock(&pdfiumMutex);
+    
+    pagesVector = nullptr;
+    
     if (synopsis) {
         delete synopsis;
         synopsis = nullptr;
@@ -167,9 +171,11 @@ void PDFiumGenerator::loadPages(QVector<Okular::Page*> &pagesVector, int rotatio
     
     QMutexLocker locker(userMutex());
     
+    d->pagesVector = pagesVector.data();
+    
     const int pagesCount = d->doc->pagesCount();
     auto pdfdoc = d->doc->pdfdoc();
-
+    
     for (int pageNumber = 0; pageNumber < pagesCount; ++pageNumber) {
         //auto page = d->doc->page(pageNumber);
         //Okular::Page* okularPage = new Okular::Page(pageNumber, page->size().width(), page->size().height(), page->orientation());
@@ -178,7 +184,7 @@ void PDFiumGenerator::loadPages(QVector<Okular::Page*> &pagesVector, int rotatio
         pageSize.setHeight(pageSize.height() / 72.0 * dpi().height());
         Okular::Page* okularPage = new Okular::Page(pageNumber, pageSize.width(), pageSize.height(), Okular::Rotation0);
         okularPage->setLabel(QPdfium::GetPageLabel(pdfdoc, pageNumber));
-        pagesVector[pageNumber] = okularPage;
+        d->pagesVector[pageNumber] = okularPage;
     }
 }
 
@@ -310,14 +316,29 @@ Okular::TextPage* PDFiumGenerator::textPage(Okular::TextRequest *request)
         }
 
         // generate links rects only the first time
-        bool genObjectRects = !d->rectsGenerated.at(pageNumber) && page->hasLinks();
-        d->rectsGenerated[pageNumber] = true;
+        bool genObjectRects = !d->rectsGenerated.at(pageNumber);
         if (genObjectRects) {
-            request->page()->setObjectRects(page->links());
+            if (page->hasLinks()) {
+                request->page()->setObjectRects(page->links());
+            }
+
+            // Check orientation of the page
+            if (request->page()->orientation() != page->orientation()) {
+                auto pageSize = QPdfium::GetPageSizeF(d->pdfDoc, pageNumber);
+                pageSize.setWidth(pageSize.width() / 72.0 * dpi().width());
+                pageSize.setHeight(pageSize.height() / 72.0 * dpi().height());
+                
+                Okular::Page* newOkularPage = new Okular::Page(pageNumber, pageSize.width(), pageSize.height(), page->orientation());
+                newOkularPage->setLabel(QPdfium::GetPageLabel(d->pdfDoc, pageNumber));
+                
+                auto oldPagePtr = d->pagesVector[pageNumber];
+                d->pagesVector[pageNumber] = newOkularPage;
+                delete oldPagePtr;
+            }
         }
         d->rectsGenerated[pageNumber] = true;
     }
-    
+
     return result;
 }
 
