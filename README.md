@@ -22,5 +22,4 @@ $ sudo make install
 Bugs
 ----
 - Text Selection still buggy
-- Wrong Page zoom scale
-- Let me know
+- Ignore page orientation
