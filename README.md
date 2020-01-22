@@ -22,4 +22,11 @@ $ sudo make install
 Bugs
 ----
 - Text Selection still buggy
-- Ignore page orientation
+- ???
+
+Not implemented
+---------
+- Printing
+- Embeded files
+- Forms
+-

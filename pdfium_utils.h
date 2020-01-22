@@ -47,7 +47,7 @@ namespace QPdfium {
     QPointF GetLocationInPage(FPDF_DEST destination);
     QRectF FloatPageRectToPixelRect(FPDF_PAGE page, const QRectF &input);
     QRectF GetFloatCharRectInPixels(FPDF_PAGE page, FPDF_TEXTPAGE textPage, int index);
-
+    QString GetBookmarkTitle(FPDF_BOOKMARK bookmark);
 }
 
 #endif //PDFIUM_UTILS_H

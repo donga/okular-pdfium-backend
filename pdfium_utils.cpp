@@ -9,6 +9,7 @@
 
 #include <pdfium/fpdf_text.h>
 
+#include <QVector>
 #include <QRegExp>
 
 #include "pdfium_utils.h"
@@ -45,8 +46,8 @@ QString GetPageLabel(FPDF_DOCUMENT pdfdoc, int pageNumber)
 QSizeF GetPageSizeF(FPDF_DOCUMENT pdfdoc, int pageNumber)
 {
     double width, height;
-    FPDF_GetPageSizeByIndex(pdfdoc, pageNumber, &width, &height);
-    return QSizeF(width, height);
+    bool isDone = FPDF_GetPageSizeByIndex(pdfdoc, pageNumber, &width, &height);
+    return isDone ? QSizeF(width, height) : QSizeF();
 }
 
 QPointF GetLocationInPage(FPDF_DEST destination)
@@ -110,6 +111,15 @@ QRectF GetFloatCharRectInPixels(FPDF_PAGE page, FPDF_TEXTPAGE textPage, int inde
 bool isWhiteSpace(const QString &str)
 {
   return QRegExp(QStringLiteral("\\s*")).exactMatch(str);
+}
+
+QString GetBookmarkTitle(FPDF_BOOKMARK bookmark)
+{
+    const unsigned long titleLength = FPDFBookmark_GetTitle(bookmark, nullptr, 0);
+    QVector<ushort> titleBuffer(titleLength);
+    FPDFBookmark_GetTitle(bookmark, titleBuffer.data(), titleBuffer.length());
+    
+    return QString::fromUtf16(titleBuffer.data());
 }
 
 }

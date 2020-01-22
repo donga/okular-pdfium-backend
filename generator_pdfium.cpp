@@ -16,15 +16,11 @@
 #include <pdfium/fpdf_sysfontinfo.h>
 
 #include <QSharedData>
-#include <QWeakPointer>
-#include <QScopedPointer>
 #include <QBitArray>
 #include <QLocale>
 #include <QDateTime>
-#include <QMatrix>
 #include <QImage>
 #include <QMutexLocker>
-#include <QCoreApplication>
 
 #include <okular/core/action.h>
 #include <okular/core/page.h>
@@ -46,12 +42,76 @@ public:
     PDFiumGeneratorPrivate(const PDFiumGeneratorPrivate &other);
     ~PDFiumGeneratorPrivate();
 
+public:
+    PDFiumGenerator *q;
     Okular::Page* *pagesVector {nullptr};
     QPdfium::Document *doc {nullptr};
-    FPDF_DOCUMENT pdfDoc {nullptr};
     int pagesCount {-1};
     Okular::DocumentSynopsis *synopsis {nullptr};
     QBitArray rectsGenerated;
+
+public:
+    bool fillDocumentViewport(FPDF_DEST destination, Okular::DocumentViewport *viewport)
+    {
+        bool result = false;
+        
+        if (!doc || !viewport)
+            return result;
+        
+        if (!doc->pdfdoc())
+            return result;
+        
+        const int pageNumber = FPDFDest_GetDestPageIndex(doc->pdfdoc(), destination);
+        if (pageNumber >= 0) {
+            viewport->pageNumber = pageNumber;
+            
+            QPointF targetPointF = QPdfium::GetLocationInPage(destination);
+            if (!targetPointF.isNull()) {
+                auto targetSizeF = QPdfium::GetPageSizeF(doc->pdfdoc(), pageNumber);
+                viewport->rePos.pos = Okular::DocumentViewport::TopLeft;
+                viewport->rePos.normalizedX = targetPointF.x() / targetSizeF.width();
+                viewport->rePos.normalizedY = (targetSizeF.height() - targetPointF.y()) / targetSizeF.height();
+                viewport->rePos.enabled = true;
+            }
+            result = true;
+        }
+        
+        return result;
+    }
+
+    void recurseCreateTOC(QDomDocument &mainDoc, 
+                          FPDF_BOOKMARK parentBookmark,
+                          QDomNode &parentDestination)
+    {
+        FPDF_BOOKMARK bookmark = FPDFBookmark_GetFirstChild(doc->pdfdoc(), parentBookmark);
+        while (bookmark) {
+            QDomElement newel = mainDoc.createElement(QPdfium::GetBookmarkTitle(bookmark));
+            
+            Okular::DocumentViewport viewport;
+            if (fillDocumentViewport(FPDFBookmark_GetDest(doc->pdfdoc(), bookmark), &viewport)) {
+                if (parentBookmark == nullptr) {
+                    newel.setAttribute(QStringLiteral("Open"), QStringLiteral("true"));
+                }
+                newel.setAttribute(QStringLiteral("Viewport"), viewport.toString());
+            }
+            
+            parentDestination.appendChild(newel);
+            recurseCreateTOC(mainDoc, bookmark, newel);
+            bookmark = FPDFBookmark_GetNextSibling(doc->pdfdoc(), bookmark);
+        }
+    }
+    
+    Okular::Page *newOkularPage(int pageNumber, Okular::Rotation orientation, const QSizeF &dpi)
+    {
+        auto pageSize = QPdfium::GetPageSizeF(doc->pdfdoc(), pageNumber);
+        pageSize.setWidth(pageSize.width() / 72.0 * dpi.width());
+        pageSize.setHeight(pageSize.height() / 72.0 * dpi.height());
+
+        Okular::Page* newPage = new Okular::Page(pageNumber, pageSize.width(), pageSize.height(), orientation);
+        newPage->setLabel(QPdfium::GetPageLabel(doc->pdfdoc(), pageNumber));
+        
+        return newPage;
+    }
 
 private:
     void initLibrary()
@@ -73,12 +133,12 @@ private:
             FPDF_DestroyLibrary();
         }
     }
+
 };
 
 
 PDFiumGeneratorPrivate::PDFiumGeneratorPrivate()
-  : pdfDoc(nullptr)
-  , synopsis(nullptr)
+  : synopsis(nullptr)
 {
     QMutexLocker lock(&pdfiumMutex);
     initLibrary();
@@ -86,7 +146,6 @@ PDFiumGeneratorPrivate::PDFiumGeneratorPrivate()
 
 PDFiumGeneratorPrivate::PDFiumGeneratorPrivate(const PDFiumGeneratorPrivate &other)
   : QSharedData(other)
-  , pdfDoc(other.pdfDoc)
   , synopsis(other.synopsis)
 {
     QMutexLocker lock(&pdfiumMutex);
@@ -115,6 +174,7 @@ PDFiumGenerator::PDFiumGenerator(QObject* parent, const QVariantList& args)
   : Okular::Generator(parent, args)
   , d(new PDFiumGeneratorPrivate())
 {
+    d->q = this;
     setFeature(Threaded);
     setFeature(TextExtraction);
     setFeature(PageSizes);
@@ -173,18 +233,8 @@ void PDFiumGenerator::loadPages(QVector<Okular::Page*> &pagesVector, int rotatio
     
     d->pagesVector = pagesVector.data();
     
-    const int pagesCount = d->doc->pagesCount();
-    auto pdfdoc = d->doc->pdfdoc();
-    
-    for (int pageNumber = 0; pageNumber < pagesCount; ++pageNumber) {
-        //auto page = d->doc->page(pageNumber);
-        //Okular::Page* okularPage = new Okular::Page(pageNumber, page->size().width(), page->size().height(), page->orientation());
-        auto pageSize = QPdfium::GetPageSizeF(pdfdoc, pageNumber);
-        pageSize.setWidth(pageSize.width() / 72.0 * dpi().width());
-        pageSize.setHeight(pageSize.height() / 72.0 * dpi().height());
-        Okular::Page* okularPage = new Okular::Page(pageNumber, pageSize.width(), pageSize.height(), Okular::Rotation0);
-        okularPage->setLabel(QPdfium::GetPageLabel(pdfdoc, pageNumber));
-        d->pagesVector[pageNumber] = okularPage;
+    for (int pageNumber = 0; pageNumber < d->doc->pagesCount(); ++pageNumber) {
+        d->pagesVector[pageNumber] = d->newOkularPage(pageNumber, Okular::Rotation0, dpi());
     }
 }
 
@@ -250,40 +300,6 @@ Okular::DocumentInfo PDFiumGenerator::generateDocumentInfo(const QSet<Okular::Do
     return docInfo;
 }
 
-static void recurseCreateTOC(const FPDF_DOCUMENT &document, QDomDocument &mainDoc, 
-                             FPDF_BOOKMARK parentBookmark,
-                             QDomNode &parentDestination, const QSizeF &dpi)
-{
-    FPDF_BOOKMARK bookmark = FPDFBookmark_GetFirstChild(document, parentBookmark);
-    while (bookmark) {
-        const unsigned long titleLength = FPDFBookmark_GetTitle(bookmark, nullptr, 0);
-        QVector<ushort> titleBuffer(titleLength);
-        FPDFBookmark_GetTitle(bookmark, titleBuffer.data(), titleBuffer.length());
-        const FPDF_DEST destination = FPDFBookmark_GetDest(document, bookmark);
-        const int pageNumber = FPDFDest_GetDestPageIndex(document, destination);
-
-        QDomElement newel = mainDoc.createElement(QString::fromUtf16(titleBuffer.data()));
-        double pageWidth, pageHeight;
-        if (pageNumber != -1 && FPDF_GetPageSizeByIndex(document, pageNumber, &pageWidth, &pageHeight)) {
-            Okular::DocumentViewport vp(pageNumber);
-            QPointF targetPointF = QPdfium::GetLocationInPage(destination);
-            if (!targetPointF.isNull()) {
-                vp.rePos.pos = Okular::DocumentViewport::TopLeft;
-                vp.rePos.normalizedX = targetPointF.x() / pageWidth;
-                vp.rePos.normalizedY = (pageHeight - targetPointF.y()) / pageHeight;
-                vp.rePos.enabled = true;
-            }
-            if (parentBookmark == nullptr) {
-                newel.setAttribute(QStringLiteral("Open"), QStringLiteral("true"));
-            }
-            newel.setAttribute(QStringLiteral("Viewport"), vp.toString());
-        }
-        parentDestination.appendChild(newel);
-        recurseCreateTOC(document, mainDoc, bookmark, newel, dpi);
-        bookmark = FPDFBookmark_GetNextSibling(document, bookmark);
-    }
-}
-
 const Okular::DocumentSynopsis *PDFiumGenerator::generateDocumentSynopsis()
 {
     if (d->synopsis) {
@@ -293,7 +309,7 @@ const Okular::DocumentSynopsis *PDFiumGenerator::generateDocumentSynopsis()
     QMutexLocker locker(userMutex());
     
     d->synopsis = new Okular::DocumentSynopsis();
-    recurseCreateTOC(d->doc->pdfdoc(), *d->synopsis, nullptr, *d->synopsis, dpi());
+    d->recurseCreateTOC(*d->synopsis, nullptr, *d->synopsis);
 
     return d->synopsis;
 }
@@ -315,25 +331,20 @@ Okular::TextPage* PDFiumGenerator::textPage(Okular::TextRequest *request)
             result->append(entity->str, new Okular::NormalizedRect(entity->area, pageWidth, pageHeight));
         }
 
-        // generate links rects only the first time
+        // generate links rects & change page orientation only the first time
         bool genObjectRects = !d->rectsGenerated.at(pageNumber);
         if (genObjectRects) {
             if (page->hasLinks()) {
-                request->page()->setObjectRects(page->links());
+                QLinkedList<Okular::ObjectRect*> links;
+                links << page->links();
+                request->page()->setObjectRects(links);
             }
-
-            // Check orientation of the page
+            
+            // Change page orientation
             if (request->page()->orientation() != page->orientation()) {
-                auto pageSize = QPdfium::GetPageSizeF(d->pdfDoc, pageNumber);
-                pageSize.setWidth(pageSize.width() / 72.0 * dpi().width());
-                pageSize.setHeight(pageSize.height() / 72.0 * dpi().height());
-                
-                Okular::Page* newOkularPage = new Okular::Page(pageNumber, pageSize.width(), pageSize.height(), page->orientation());
-                newOkularPage->setLabel(QPdfium::GetPageLabel(d->pdfDoc, pageNumber));
-                
-                auto oldPagePtr = d->pagesVector[pageNumber];
-                d->pagesVector[pageNumber] = newOkularPage;
-                delete oldPagePtr;
+                auto oldPage = d->pagesVector[pageNumber];
+                d->pagesVector[pageNumber] = d->newOkularPage(pageNumber, page->orientation(), dpi());
+                delete oldPage;
             }
         }
         d->rectsGenerated[pageNumber] = true;
@@ -341,6 +352,7 @@ Okular::TextPage* PDFiumGenerator::textPage(Okular::TextRequest *request)
 
     return result;
 }
+
 
 QVariant PDFiumGenerator::metaData(const QString& key, const QVariant& option) const
 {
@@ -351,25 +363,13 @@ QVariant PDFiumGenerator::metaData(const QString& key, const QVariant& option) c
         return d->doc->pageMode() == QPdfium::PageMode_FullScreen;
     }
     else if (key == QStringLiteral("NamedViewport") && !option.toString().isEmpty()) {
-        QString optionString = option.toString();
+        QString optionStr = option.toString();
         Okular::DocumentViewport viewport;
-        auto doc = d->doc->pdfdoc();
 
         QMutexLocker locker(userMutex());
-        FPDF_DEST destination = FPDF_GetNamedDestByName(doc, optionString.toLatin1().constData());
-        const int pageNumber = FPDFDest_GetDestPageIndex(doc, destination);
-        if (pageNumber >= 0) {
-            QPointF targetPointF = QPdfium::GetLocationInPage(destination);
-            if (!targetPointF.isNull()) {
-                auto targetSizeF = QPdfium::GetPageSizeF(doc, pageNumber);
-                viewport.rePos.pos = Okular::DocumentViewport::TopLeft;
-                viewport.pageNumber = pageNumber;
-                viewport.rePos.normalizedX = targetPointF.x() / targetSizeF.width();
-                viewport.rePos.normalizedY = (targetSizeF.height() - targetPointF.y()) / targetSizeF.height();
-                viewport.rePos.enabled = true;
-            }
+        FPDF_DEST dest = FPDF_GetNamedDestByName(d->doc->pdfdoc(), optionStr.toLatin1().constData());
+        if (d->fillDocumentViewport(dest, &viewport))
             return viewport.toString();
-        }
     }
     else if (key == QLatin1String("DocumentTitle")) {
         QMutexLocker locker(userMutex());

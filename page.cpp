@@ -52,10 +52,10 @@ public:
             const int fzOrientation = FPDFPage_GetRotation(fzPage);
             switch (fzOrientation)
             {
-                case 1: orientation = Okular::Rotation90;  break;
-                case 2: orientation = Okular::Rotation180; break;
-                case 3: orientation = Okular::Rotation270; break;
-                case 0: orientation = Okular::Rotation0;   break;
+            case 1: orientation = Okular::Rotation90;  break;
+            case 2: orientation = Okular::Rotation180; break;
+            case 3: orientation = Okular::Rotation270; break;
+            case 0: orientation = Okular::Rotation0;   break;
             }
         }
         return orientation;
@@ -114,22 +114,32 @@ public:
     QImage image(const int &width, const int &height)
     {
         if ((cachedImage.isNull() && getPage()) || (cachedImage.size() != QSize(width, height))) {
-            QImage image(width, height, QImage::Format_RGBA8888);
-            image.setDevicePixelRatio(qGuiApp->devicePixelRatio());
-            if (FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(image.width(), image.height(), FPDFBitmap_BGRA, image.bits(), image.bytesPerLine())) {
-                image.fill(0xFFFFFFFF);
-                FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, image.width(), image.height(), 0, FPDF_ANNOT | FPDF_LCD_TEXT | FPDF_REVERSE_BYTE_ORDER);// | FPDF_PRINTING
+            QImage img(width, height, QImage::Format_RGBA8888);
+            FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(img.width(), img.height()
+                                                    , FPDFBitmap_BGRA
+                                                    , img.bits()
+                                                    , img.bytesPerLine()
+                                                    );
+            if (bitmap) {
+                img.setDevicePixelRatio(qGuiApp->devicePixelRatio());
+                img.fill(0xFFFFFFFF);
+                int renderFlags = 0;
+                renderFlags |= FPDF_ANNOT;
+                renderFlags |= FPDF_LCD_TEXT;
+                renderFlags |= FPDF_REVERSE_BYTE_ORDER;
+                //renderFlags |= FPDF_PRINTING;
+                FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, img.width(), img.height(), 0, renderFlags);
                 FPDFBitmap_Destroy(bitmap);
             }
-            cachedImage = image;
+            cachedImage = img;
         }
         return cachedImage;
     }
 
     void clearCharEntityList()
     {
-        while (!charEntityList.isEmpty())
-            delete charEntityList.takeFirst();
+        qDeleteAll(charEntityList);
+        charEntityList.clear();
     }
 
     QList<CharEntity*> getCharEntityList()
@@ -198,6 +208,13 @@ public:
         return isHasLinks;
     }
 
+    void clearLinks()
+    {
+        isLinksGenerated = false;
+        qDeleteAll(links);
+        links.clear();
+    }
+    
     QLinkedList<Okular::ObjectRect*> getLinks()
     {
         if (!getPage())
