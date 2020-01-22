@@ -113,6 +113,7 @@ PDFiumGenerator::PDFiumGenerator(QObject* parent, const QVariantList& args)
 {
     setFeature(Threaded);
     setFeature(TextExtraction);
+    setFeature(PageSizes);
 }
 
 PDFiumGenerator::~PDFiumGenerator()
@@ -168,7 +169,7 @@ void PDFiumGenerator::loadPages(QVector<Okular::Page*> &pagesVector, int rotatio
     
     const int pagesCount = d->doc->pagesCount();
     auto pdfdoc = d->doc->pdfdoc();
-    
+
     for (int pageNumber = 0; pageNumber < pagesCount; ++pageNumber) {
         //auto page = d->doc->page(pageNumber);
         //Okular::Page* okularPage = new Okular::Page(pageNumber, page->size().width(), page->size().height(), page->orientation());

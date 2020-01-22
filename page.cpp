@@ -18,6 +18,7 @@
 #include <QImage>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QGuiApplication>
 
 #include <okular/core/action.h>
 #include <okular/core/document.h>
@@ -112,11 +113,12 @@ public:
 
     QImage image(const int &width, const int &height)
     {
-        if ((cachedImage.isNull() && getPage()) || (cachedImage.size() != QSize(width, height))) {
-            QImage image(width, height, QImage::Format_ARGB32);
+        if ((cachedImage.size() != QSize(width, height)) || (cachedImage.isNull() && getPage())) {
+            QImage image(width, height, QImage::Format_RGBA8888);
+            image.setDevicePixelRatio(qGuiApp->devicePixelRatio());
             if (FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(image.width(), image.height(), FPDFBitmap_BGRA, image.bits(), image.bytesPerLine())) {
                 image.fill(0xFFFFFFFF);
-                FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, image.width(), image.height(), 0, FPDF_ANNOT);//FPDF_ANNOT | FPDF_PRINTING | FPDF_LCD_TEXT);
+                FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, image.width(), image.height(), 0, FPDF_ANNOT | FPDF_LCD_TEXT | FPDF_REVERSE_BYTE_ORDER);// | FPDF_PRINTING);
                 FPDFBitmap_Destroy(bitmap);
             }
             cachedImage = image;
