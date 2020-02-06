@@ -20,6 +20,7 @@
 #include <QLocale>
 #include <QDateTime>
 #include <QImage>
+#include <QTimer>
 #include <QMutexLocker>
 
 #include <okular/core/action.h>
@@ -177,7 +178,8 @@ PDFiumGenerator::PDFiumGenerator(QObject* parent, const QVariantList& args)
     d->q = this;
     setFeature(Threaded);
     setFeature(TextExtraction);
-    setFeature(PageSizes);
+    //setFeature(PageSizes);
+    setFeature(TiledRendering);
 }
 
 PDFiumGenerator::~PDFiumGenerator()
@@ -238,11 +240,42 @@ void PDFiumGenerator::loadPages(QVector<Okular::Page*> &pagesVector, int rotatio
     }
 }
 
+
+struct RenderImagePayload
+{
+    RenderImagePayload(PDFiumGenerator *g, Okular::PixmapRequest *r) :
+        generator(g), request(r)
+    {
+        // Don't report partial updates for the first 500 ms
+        timer.setInterval(500);
+        timer.setSingleShot(true);
+        timer.start();
+    }
+
+    PDFiumGenerator *generator;
+    Okular::PixmapRequest *request;
+    QTimer timer;
+};
+Q_DECLARE_METATYPE(RenderImagePayload*)
+
+
 QImage PDFiumGenerator::image(Okular::PixmapRequest* request)
 {
+    // compute dpi used to get an image with desired width and height
+    Okular::Page *okularPage = request->page();
+
+    double pageWidth = okularPage->width(),
+           pageHeight = okularPage->height();
+
+    if ( okularPage->rotation() % 2 )
+        qSwap( pageWidth, pageHeight );
+
+    float fakeDpiX = request->width() / pageWidth * dpi().width();
+    float fakeDpiY = request->height() / pageHeight * dpi().height();
+    
     QMutexLocker locker(userMutex());
     
-    const int pageNumber = request->page()->number();
+    const int pageNumber = request->pageNumber();
     auto page = d->doc->page(pageNumber);
     
     if (request->shouldAbortRender()) {
@@ -250,7 +283,32 @@ QImage PDFiumGenerator::image(Okular::PixmapRequest* request)
     }
     
     if (page) {
-        return page->image(request->width(), request->height());
+        request->page()->text(); // call text for trigger generate ObjectRects ??
+        
+        if (request->isTile()) {
+            const QRect rect = request->normalizedRect().geometry( request->width(), request->height() );
+            /*if (request->partialUpdatesWanted()) {
+                //RenderImagePayload payload( this, request );
+                //img = p->renderToImage( fakeDpiX, fakeDpiY, rect.x(), rect.y(), rect.width(), rect.height(), Poppler::Page::Rotate0,
+                //                        partialUpdateCallback, shouldDoPartialUpdateCallback, shouldAbortRenderCallback, QVariant::fromValue( &payload ) );
+                qDebug() << "image()->tile():partialUpdatesWanted() reqRect:" << rect 
+                         << " fakeDpi: " << QSizeF(fakeDpiX,fakeDpiY) 
+                         << " pageSize:" << page->size() 
+                         << " reqSize: " << QSizeF(request->width(), request->height());
+                return page->renderToImage(fakeDpiX, fakeDpiY, rect.x(), rect.y(), rect.width(), rect.height(), Okular::Rotation0);
+            }
+            else {
+                //RenderImagePayload payload( this, request );
+                //img = p->renderToImage( fakeDpiX, fakeDpiY, rect.x(), rect.y(), rect.width(), rect.height(), Poppler::Page::Rotate0,
+                //                        nullptr, nullptr, shouldAbortRenderCallback, QVariant::fromValue( &payload ) );
+                qDebug() << "image()->tile():!partialUpdatesWanted()" << rect << QSizeF(fakeDpiX,fakeDpiY) << page->size() << QSizeF(request->width(), request->height());
+                return page->renderToImage(fakeDpiX, fakeDpiY, rect.x(), rect.y(), rect.width(), rect.height(), Okular::Rotation0);
+            }*/
+            return page->renderToImage(fakeDpiX, fakeDpiY, rect.x(), rect.y(), rect.width(), rect.height(), Okular::Rotation0);
+        }
+        else {
+            return page->image(request->width(), request->height());
+        }
     }
     
     return QImage();
@@ -335,11 +393,9 @@ Okular::TextPage* PDFiumGenerator::textPage(Okular::TextRequest *request)
         bool genObjectRects = !d->rectsGenerated.at(pageNumber);
         if (genObjectRects) {
             if (page->hasLinks()) {
-                QLinkedList<Okular::ObjectRect*> links;
-                links << page->links();
-                request->page()->setObjectRects(links);
+                request->page()->setObjectRects(page->links());
             }
-            
+
             // Change page orientation
             if (request->page()->orientation() != page->orientation()) {
                 auto oldPage = d->pagesVector[pageNumber];

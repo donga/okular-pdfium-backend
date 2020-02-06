@@ -41,9 +41,11 @@ public:
 
     ~PagePrivate()
     {
+        QMutexLocker locker(&mutex);
         closeTextPage();
         closePage();
         clearCharEntityList();
+        clearLinks();
     }
 
     Okular::Rotation getOrientation()
@@ -113,7 +115,7 @@ public:
 
     QImage image(const int &width, const int &height)
     {
-        if ((cachedImage.isNull() && getPage()) || (cachedImage.size() != QSize(width, height))) {
+        if (getPage() && (cachedImage.isNull() || (cachedImage.size() != QSize(width, height)))) {
             QImage img(width, height, QImage::Format_RGBA8888);
             FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(img.width(), img.height()
                                                     , FPDFBitmap_BGRA
@@ -121,21 +123,52 @@ public:
                                                     , img.bytesPerLine()
                                                     );
             if (bitmap) {
-                img.setDevicePixelRatio(qGuiApp->devicePixelRatio());
                 img.fill(0xFFFFFFFF);
                 int renderFlags = 0;
                 renderFlags |= FPDF_ANNOT;
                 renderFlags |= FPDF_LCD_TEXT;
                 renderFlags |= FPDF_REVERSE_BYTE_ORDER;
                 //renderFlags |= FPDF_PRINTING;
+                
                 FPDF_RenderPageBitmap(bitmap, fzPage, 0, 0, img.width(), img.height(), 0, renderFlags);
                 FPDFBitmap_Destroy(bitmap);
             }
+            else
+                qDebug() << "PagePrivate::image() : Can't create Bitmap";
+            
             cachedImage = img;
         }
         return cachedImage;
     }
 
+    QImage renderToImage(float dpiX, float dpiY, int x, int y, int width, int height, Okular::Rotation rotation)
+    {
+        Q_UNUSED(rotation)
+        
+        QImage img(width, height, QImage::Format_ARGB32);
+        if (getPage()) {
+            FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(img.width(), img.height()
+                                                    , FPDFBitmap_BGRA
+                                                    , img.bits()
+                                                    , img.bytesPerLine()
+                                                    );
+            if (bitmap) {
+                img.fill(0xFFFFFFFF);
+                int renderFlags = 0;
+                renderFlags |= FPDF_ANNOT;
+                renderFlags |= FPDF_LCD_TEXT;
+                renderFlags |= FPDF_REVERSE_BYTE_ORDER;
+                //renderFlags |= FPDF_PRINTING;
+                
+                FS_MATRIX renderMatrix { dpiX/72.f, 0, 0, dpiY/72.f, -float(x), -float(y) };
+                FS_RECTF clipRect { 0, 0, float(img.width()-1), float(img.height()-1) };
+                FPDF_RenderPageBitmapWithMatrix(bitmap, fzPage, &renderMatrix, &clipRect, 0);
+                FPDFBitmap_Destroy(bitmap);
+            }
+        }
+        return img;
+    }
+    
     void clearCharEntityList()
     {
         qDeleteAll(charEntityList);
@@ -210,9 +243,10 @@ public:
 
     void clearLinks()
     {
-        isLinksGenerated = false;
-        qDeleteAll(links);
-        links.clear();
+        if (!links.isEmpty()) {
+            //qDeleteAll(links); // Okular::Page will delete these objects instance itself
+            links.clear();
+        }
     }
     
     QLinkedList<Okular::ObjectRect*> getLinks()
@@ -220,7 +254,7 @@ public:
         if (!getPage())
             return links;
 
-        if (isLinksGenerated)
+        if (!links.isEmpty())
             return links;
 
         const qreal width   = pageSize.width();
@@ -281,10 +315,7 @@ public:
                     links.push_back(rect);
                 }
             }
-
         }
-        
-        isLinksGenerated = true;
         
         return links;
     }
@@ -304,7 +335,6 @@ public:
     QList<CharEntity*> charEntityList;
     QLinkedList<Okular::ObjectRect*> links;
     bool isHasLinks {false};
-    bool isLinksGenerated {false};
     QMutex mutex;
 };
 
@@ -359,12 +389,14 @@ Okular::Rotation Page::orientation() const
 
 int Page::numChars() const
 {
+    QMutexLocker locker(&d->mutex);
     d->getTextPage();
     return d->numChars;
 }
 
 int Page::numRects() const
 {
+    QMutexLocker locker(&d->mutex);
     d->getTextPage();
     return d->numRects;
 }
@@ -373,6 +405,12 @@ QImage Page::image(const int &width, const int &height)
 {
     QMutexLocker locker(&d->mutex);
     return d->image(width, height);
+}
+
+QImage Page::renderToImage(float dpiX, float dpiY, int x, int y, int width, int height, Okular::Rotation rotation)
+{
+    QMutexLocker locker(&d->mutex);
+    return d->renderToImage(dpiX, dpiY, x, y, width, height, rotation);
 }
 
 QList<CharEntity*> Page::charEntityList() const

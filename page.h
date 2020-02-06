@@ -54,6 +54,7 @@ public:
     bool hasLinks();
     QLinkedList<Okular::ObjectRect*> links() const;
     QImage image(const int &width, const int &height);
+    QImage renderToImage(float dpiX, float dpiY, int x, int y, int width, int height, Okular::Rotation rotation);
 
 private:
     QSharedPointer<PagePrivate> d;
